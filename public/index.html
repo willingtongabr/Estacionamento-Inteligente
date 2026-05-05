@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UNIMAR Smart Parking - Painel de Controle</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+
+    <script>
+        // 🚨 COLOQUE AS SUAS URLs DO CODESPACES AQUI:
+        const API_BACKEND = "https://improved-spoon-qrq97j69r652x96j-3000.app.github.dev/api/v1";
+        const API_SIMULADOR = "https://improved-spoon-qrq97j69r652x96j-3001.app.github.dev/api/v1";
+
+        // Sistema de abas
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('border-blue-500', 'text-blue-500'));
+            
+            document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+            document.getElementById(`btn-${tabName}`).classList.add('border-blue-500', 'text-blue-500');
+        }
+
+        // --- ABA 1: MONITORAMENTO ---
+        async function fetchDashboard() {
+            try {
+                // 1. Atualiza Setores
+                const resSec = await fetch(`${API_BACKEND}/sectors`);
+                const sectors = await resSec.json();
+                let secHtml = '';
+                sectors.forEach(s => {
+                    const pct = (s.occupancyRate * 100).toFixed(0);
+                    secHtml += `
+                        <div class="bg-gray-800 p-5 rounded-xl border border-gray-700 shadow-lg">
+                            <h3 class="text-xl font-bold text-blue-400">Setor ${s.sectorId}</h3>
+                            <p class="text-sm text-gray-400 mt-1">Status: <span class="font-bold text-white">${s.occupiedCount} / ${s.total} ocupados</span></p>
+                            <div class="w-full bg-gray-700 h-3 rounded-full mt-3 overflow-hidden">
+                                <div class="bg-blue-500 h-full transition-all duration-500" style="width: ${pct}%"></div>
+                            </div>
+                            <p class="text-right text-xs mt-1 text-gray-400">${pct}% cheio</p>
+                        </div>
+                    `;
+                });
+                document.getElementById('sectors-grid').innerHTML = secHtml;
+
+                // 2. Atualiza Mapa de Vagas
+                const resMap = await fetch(`${API_BACKEND}/map`);
+                const spots = await resMap.json();
+                const letters = ['A', 'B', 'C'];
+                let mapHtml = '';
+                
+                letters.forEach(sec => {
+                    const secSpots = spots.filter(s => s.sectorId === sec);
+                    mapHtml += `
+                        <div class="bg-gray-800 p-4 rounded-xl border border-gray-700">
+                            <h4 class="text-md font-bold mb-3 text-center text-gray-300">Setor ${sec}</h4>
+                            <div class="grid grid-cols-5 gap-2">
+                                ${secSpots.map(s => `
+                                    <div class="p-1.5 rounded text-center font-bold text-xs transition-colors duration-300 ${
+                                        s.currentState === 'OCCUPIED' ? 'bg-red-600 text-white' : 'bg-green-600 text-white'
+                                    }">
+                                        ${s.spotId.split('-')[1]}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                });
+                document.getElementById('map-grid').innerHTML = mapHtml;
+
+                // 3. Atualiza Recomendação (Regra R-OP1)
+                const recSec = ['A', 'B', 'C'];
+                let recHtml = '';
+                for (const sec of recSec) {
+                    try {
+                        const r = await fetch(`${API_BACKEND}/recommendation?fromSector=${sec}`);
+                        const data = await r.json();
+                        if (data && data.recommendedSector) {
+                            recHtml += `
+                                <div class="bg-yellow-900/30 border border-yellow-700 text-yellow-200 p-4 rounded-xl mb-3">
+                                    <strong>💡 Recomendação ativa para o Setor ${data.fromSector}:</strong> ${data.reason}
+                                </div>
+                            `;
+                        }
+                    } catch(e) {}
+                }
+                document.getElementById('recommendations-box').innerHTML = recHtml || `<p class="text-gray-500 text-sm">Nenhuma recomendação de desvio ativa no momento.</p>`;
+
+            } catch (err) {
+                console.error("Erro ao carregar dashboard:", err);
+            }
+        }
+
+        // --- ABA 2: INCIDENTES E FALHAS ---
+        async function fetchIncidents() {
+            try {
+                const res = await fetch(`${API_BACKEND}/incidents?status=open`);
+                const incidents = await res.json();
+                
+                let html = '';
+                if (incidents.length === 0) {
+                    html = `<tr><td colspan="5" class="p-4 text-center text-gray-500">Nenhum incidente em aberto.</td></tr>`;
+                } else {
+                    incidents.forEach(inc => {
+                        html += `
+                            <tr class="border-b border-gray-800 hover:bg-gray-800/40">
+                                <td class="p-3 font-semibold text-blue-400">${inc.spotId}</td>
+                                <td class="p-3"><span class="px-2 py-1 text-xs rounded bg-red-950 text-red-400 border border-red-800 font-bold">${inc.type}</span></td>
+                                <td class="p-3"><span class="px-2 py-1 text-xs rounded bg-orange-950 text-orange-400 font-bold">${inc.severity}</span></td>
+                                <td class="p-3 text-sm text-gray-300">${inc.evidenceJson?.detail || 'N/A'}</td>
+                                <td class="p-3 text-xs text-gray-400">${new Date(inc.tsOpen).toLocaleString()}</td>
+                            </tr>
+                        `;
+                    });
+                }
+                document.getElementById('incidents-table').innerHTML = html;
+            } catch (err) {
+                console.error("Erro ao carregar incidentes:", err);
+            }
+        }
+
+        // Função para injetar falhas via simulador (Aba 2)
+        async function injectFailure(e) {
+            e.preventDefault();
+            const spotId = document.getElementById('fail-spot').value.toUpperCase();
+            const type = document.getElementById('fail-type').value;
+
+            try {
+                const res = await fetch(`${API_SIMULADOR}/simulate/fail`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ spotId, type })
+                });
+                const data = await res.json();
+                alert(data.message || 'Falha injetada!');
+                fetchIncidents();
+            } catch (err) {
+                alert('Erro ao conectar ao simulador. Verifique a porta 3001.');
+            }
+        }
+
+        // Função para remover falhas do simulador (Aba 2)
+        async function restoreSpot(e) {
+            e.preventDefault();
+            const spotId = document.getElementById('restore-spot').value.toUpperCase();
+
+            try {
+                const res = await fetch(`${API_SIMULADOR}/simulate/restore`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ spotId })
+                });
+                const data = await res.json();
+                alert(data.message || 'Sensor restaurado!');
+                fetchIncidents();
+            } catch (err) {
+                alert('Erro ao restaurar vaga.');
+            }
+        }
+
+        // --- ABA 3: RELATÓRIOS ---
+        async function fetchTurnover(e) {
+            if(e) e.preventDefault();
+            const sectorId = document.getElementById('rep-sector').value;
+            const from = document.getElementById('rep-from').value;
+            const to = document.getElementById('rep-to').value;
+
+            if(!sectorId || !from || !to) return alert("Preencha todos os campos.");
+
+            try {
+                const res = await fetch(`${API_BACKEND}/reports/turnover?sectorId=${sectorId}&from=${new Date(from).toISOString()}&to=${new Date(to).toISOString()}`);
+                const data = await res.json();
+                
+                document.getElementById('turnover-result').innerHTML = `
+                    <div class="bg-blue-900/30 border border-blue-700 p-5 rounded-xl mt-4">
+                        <p class="text-sm text-gray-400">Total de veículos atendidos</p>
+                        <h4 class="text-4xl font-extrabold text-white mt-1">${data.turnover} <span class="text-sm font-normal text-gray-400">veículos</span></h4>
+                        <p class="text-xs text-gray-500 mt-2">Período: ${new Date(from).toLocaleString()} até ${new Date(to).toLocaleString()}</p>
+                    </div>
+                `;
+            } catch (err) {
+                alert('Erro ao gerar relatório. Certifique-se de que o backend está ativo.');
+            }
+        }
+
+        // Auto-refresh inteligente
+        setInterval(() => {
+            fetchDashboard();
+            fetchIncidents();
+        }, 3000);
+
+        window.onload = () => {
+            fetchDashboard();
+            fetchIncidents();
+            
+            // Configura datas padrão no relatório para facilitar testes
+            const now = new Date();
+            const past = new Date();
+            past.setHours(now.getHours() - 2);
+            
+            document.getElementById('rep-from').value = past.toISOString().slice(0,16);
+            document.getElementById('rep-to').value = now.toISOString().slice(0,16);
+        };
+    </script>
+
+    <div class="max-w-6xl mx-auto p-6">
+        
+        <header class="flex flex-col md:flex-row justify-between items-center mb-8 border-b border-gray-800 pb-5 gap-4">
+            <div>
+                <h1 class="text-2xl font-extrabold text-white">UNIMAR Smart Parking</h1>
+                <p class="text-sm text-gray-400">Demonstração da Sprint 2 — MQTT + HTTP API + Banco de Dados</p>
+            </div>
+            <nav class="flex bg-gray-800/60 p-1 rounded-xl border border-gray-700/50">
+                <button id="btn-monitor" onclick="switchTab('monitor')" class="tab-btn px-4 py-2 text-sm font-bold rounded-lg border-b-2 border-blue-500 text-blue-500 transition-all">
+                    🌍 Monitoramento
+                </button>
+                <button id="btn-incidents" onclick="switchTab('incidents')" class="tab-btn px-4 py-2 text-sm font-bold rounded-lg border-b-2 border-transparent hover:text-gray-300 transition-all">
+                    ⚠️ Incidentes & Testes
+                </button>
+                <button id="btn-reports" onclick="switchTab('reports')" class="tab-btn px-4 py-2 text-sm font-bold rounded-lg border-b-2 border-transparent hover:text-gray-300 transition-all">
+                    📊 Relatórios
+                </button>
+            </nav>
+        </header>
+
+        <main id="tab-monitor" class="tab-content">
+            <div id="recommendations-box" class="mb-6"></div>
+
+            <div id="sectors-grid" class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                </div>
+
+            <h3 class="text-lg font-bold mb-4 text-gray-200">Mapa do Estacionamento (90 vagas)</h3>
+            <div id="map-grid" class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                </div>
+        </main>
+
+        <main id="tab-incidents" class="tab-content hidden">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                
+                <div class="bg-gray-800 p-5 rounded-xl border border-gray-700 h-fit">
+                    <h3 class="text-lg font-bold text-red-400 mb-4">Módulo de Teste: Forçar Falhas</h3>
+                    
+                    <form onsubmit="injectFailure(event)" class="mb-6 pb-6 border-b border-gray-700">
+                        <h4 class="text-sm font-bold text-gray-300 mb-3">Injetar Inconsistência</h4>
+                        <div class="space-y-3">
+                            <div>
+                                <label class="text-xs text-gray-400">ID da Vaga (Ex: A-12, C-05)</label>
+                                <input id="fail-spot" type="text" placeholder="Ex: B-05" required class="w-full bg-gray-900 border border-gray-700 p-2 rounded text-sm mt-1 uppercase">
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-400">Tipo da Falha</label>
+                                <select id="fail-type" class="w-full bg-gray-900 border border-gray-700 p-2 rounded text-sm mt-1">
+                                    <option value="stuck_occupied">STUCK_OCCUPIED (Ocupado travado)</option>
+                                    <option value="stuck_free">STUCK_FREE (Livre travado)</option>
+                                    <option value="flapping">FLAPPING (Troca rápida)</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-sm transition-all">Aplicar Erro</button>
+                        </div>
+                    </form>
+
+                    <form onsubmit="restoreSpot(event)">
+                        <h4 class="text-sm font-bold text-gray-300 mb-3">Limpar / Restaurar Vaga</h4>
+                        <div class="space-y-3">
+                            <input id="restore-spot" type="text" placeholder="Ex: B-05" required class="w-full bg-gray-900 border border-gray-700 p-2 rounded text-sm uppercase">
+                            <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold p-2 rounded text-sm transition-all">Restaurar Sensor</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="lg:col-span-2 bg-gray-800 p-5 rounded-xl border border-gray-700">
+                    <h3 class="text-lg font-bold text-orange-400 mb-4">Incidentes Ativos (`/incidents`)</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead>
+                                <tr class="text-xs font-bold text-gray-400 uppercase border-b border-gray-700">
+                                    <th class="p-3">Vaga</th>
+                                    <th class="p-3">Tipo</th>
+                                    <th class="p-3">Gravidade</th>
+                                    <th class="p-3">Evidência</th>
+                                    <th class="p-3">Data</th>
+                                </tr>
+                            </thead>
+                            <tbody id="incidents-table">
+                                </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+
+        <main id="tab-reports" class="tab-content hidden">
+            <div class="max-w-2xl bg-gray-800 p-6 rounded-xl border border-gray-700">
+                <h3 class="text-xl font-bold text-blue-400 mb-4">Taxa de Rotatividade (`/turnover`)</h3>
+                <p class="text-sm text-gray-400 mb-6">Consulte quantos veículos foram atendidos por setor num período determinado de tempo.</p>
+
+                <form onsubmit="fetchTurnover(event)" class="space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label class="text-xs text-gray-400">Setor</label>
+                            <select id="rep-sector" class="w-full bg-gray-900 border border-gray-700 p-2 rounded text-sm mt-1">
+                                <option value="A">Setor A</option>
+                                <option value="B">Setor B</option>
+                                <option value="C">Setor C</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-400">Data Início</label>
+                            <input id="rep-from" type="datetime-local" required class="w-full bg-gray-900 border border-gray-700 p-2 rounded text-sm mt-1">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-400">Data Fim</label>
+                            <input id="rep-to" type="datetime-local" required class="w-full bg-gray-900 border border-gray-700 p-2 rounded text-sm mt-1">
+                        </div>
+                    </div>
+                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold p-3 rounded-lg text-sm transition-all">
+                        Calcular Rotatividade
+                    </button>
+                </form>
+
+                <div id="turnover-result">
+                    </div>
+            </div>
+        </main>
+
+    </div>
+</body>
+</html>
