@@ -49,7 +49,7 @@ function getArrivalProbability(hour) {
 function publishSpotEvent(spot) {
     const payload = {
         eventId: uuidv4(),
-        // 🕒 Usamos Date exato para sincronizar perfeitamente com o backend
+        // Usamos Date exato para sincronizar perfeitamente com o backend
         ts: new Date().toISOString(), 
         sectorId: spot.sectorId,
         spotId: spot.id,
@@ -130,10 +130,10 @@ function runSimulation() {
     
     const failingSpots = spots.filter(s => s.failure !== null);
     if (failingSpots.length > 0) {
-        console.log("⚠️ Vagas com Falha Injetada:");
+        console.log("Vagas com Falha Injetada:");
         failingSpots.forEach(s => console.log(` - ${s.id}: ${s.failure}`));
     } else {
-        console.log("✅ Comportamento normal em todas as vagas");
+        console.log("Comportamento normal em todas as vagas");
     }
     console.log("=========================================");
 }
@@ -167,7 +167,7 @@ app.post('/api/v1/simulate/fail', (req, res) => {
         publishSpotEvent(spot);
     }
 
-    console.log(`⚠️ Falha '${type}' aplicada na vaga ${spotId}`);
+    console.log(`Falha '${type}' aplicada na vaga ${spotId}`);
     return res.json({ message: `Falha '${type}' injetada na vaga ${spotId}`, spot });
 });
 
@@ -180,7 +180,7 @@ app.post('/api/v1/simulate/restore', (req, res) => {
     }
 
     spot.failure = null;
-    console.log(`✅ Vaga ${spotId} restaurada ao funcionamento normal.`);
+    console.log(`Vaga ${spotId} restaurada ao funcionamento normal.`);
     return res.json({ message: `Vaga ${spotId} restaurada ao normal`, spot });
 });
 
@@ -190,7 +190,7 @@ app.get('/api/v1/simulate/spots', (req, res) => {
 
 // --- CONEXÃO E START ---
 client.on('connect', () => {
-    console.log("✅ Simulador conectado ao Broker MQTT.");
+    console.log("Simulador conectado ao Broker MQTT.");
     
     // Inicia os loops
     setInterval(runSimulation, TICK_RATE);
@@ -202,5 +202,5 @@ client.on('connect', () => {
 });
 
 client.on('error', (err) => {
-    console.error("❌ Erro no MQTT do Simulador:", err);
+    console.error("Erro no MQTT do Simulador:", err);
 });
